@@ -3,4 +3,5 @@ This directory represents a series of tasks I've been given during my course in 
 
 The tasks are listed in:
 
-[Homework-1](./hw-1)
+[Homework-1](./hw-1)<br/>
+[Homework-2](./hw-2)
