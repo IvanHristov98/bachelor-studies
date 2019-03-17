@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+
+<head>
+    <meta charset="utf-8"/>
+    <title>Заливът</title>
+
+    <script src="webgl-fmi.js"></script>
+    <script src="shaders.js"></script>
+
+    <script>
+        /**
+        * Извинявам се за грозния код, просто исках да е малко по-оптимизиран, но се оказа, че gl.UNSIGNED_SHORT
+         * е до 64k елемента, а те са около 66k.
+         * Документация относно полиномите използвани за цветовете може да се открие в прикачения .nb файл.
+        */
+        // генериране на нагънатата повърхност
+        var n = 256;
+        var data2 = [];
+
+        for (var x=0; x<=n; x++)
+        {
+            data2[x] = [];
+
+            for (var y=0; y<=n; y++) { data2[x][y] = [x-n/2,y-n/2,0]; }
+        }
+
+        // функция за нагъване на терена
+        function terrain(x1,y1,x2,y2)
+        {
+            var xm = (x1+x2)/2;
+            var ym = (y1+y2)/2;
+
+            data2[xm][y1][2] = (data2[x1][y1][2]+data2[x2][y1][2])/2;
+            data2[xm][y2][2] = (data2[x1][y2][2]+data2[x2][y2][2])/2;
+            data2[x1][ym][2] = (data2[x1][y1][2]+data2[x1][y2][2])/2;
+            data2[x2][ym][2] = (data2[x2][y1][2]+data2[x2][y2][2])/2;
+            data2[xm][ym][2] = (data2[xm][y1][2]+data2[xm][y2][2])/2;
+
+            var k = (x2-x1)/((2<2)?7:3);
+            data2[xm][y1][2] += random(-k,k);
+            data2[xm][y2][2] += random(-k,k);
+            data2[x1][ym][2] += random(-k,k);
+            data2[x2][ym][2] += random(-k,k);
+            data2[xm][ym][2] += random(-k,k);
+        }
+
+        size = n;
+        while (size>1)
+        {
+            for (var x=0; x<n; x+=size)
+                for (var y=0; y<n; y+=size)
+                    terrain(x,y,x+size,y+size);
+            size /= 2;
+        }
+
+        // случаен терен
+        RandomTerrain = function()
+        {
+            // цветове
+            this.grass = [0.18,0.54,0.25];
+            this.snow = [1,1,1];
+            this.sand = [0.96,0.82,0.24];
+            this.seaBottom = [0,0,0.5];
+
+            /* ====================== Върхове ====================== */
+
+            // най-висока точка в буфера
+            this.highestVertex = [0,0,0];
+
+            // някакво малко число за определяне на нормалите
+            let eps = 0.01;
+
+            // масив за съхранение на върховете
+            let vertexData = [];
+
+            for (var x=0; x<=n; x++)
+            {
+                for (var y=0; y<=n; y++)
+                {
+                    vertexData.push(data2[x][y][0],data2[x][y][1],data2[x][y][2]);
+
+                    // определяне на най-високата точка
+                    if (this.highestVertex[2] < data2[x][y][2])
+                    {
+                        for (let i=0; i<3; ++i) { this.highestVertex[i] = data2[x][y][i]; }
+                    }
+
+                    // пресмятане на нормалите
+                    let p0 = [data2[x][y][0],data2[x][y][1],data2[x][y][2]];
+                    let p1, p2;
+                    if (x - 1 >= 0)
+                    {
+                        p1 = [data2[x][y][0]-eps,data2[x][y][1],data2[x][y][2]*(1-eps) + data2[x-1][y][2]*eps];
+                    }
+                    else { p1 = [data2[x][y][0]-eps,data2[x][y][1],data2[x][y][2]]; }
+
+                    if (y - 1 >= 0)
+                    {
+                        p2 = [data2[x][y][0],data2[x][y][1]-eps,data2[x][y][2]*(1-eps) + data2[x][y-1][2]*eps];
+                    }
+                    else { p2 = [data2[x][y][0],data2[x][y][1]-eps,data2[x][y][2]]; }
+
+                    // Добавяне на нормалите
+                    let normal = unitVector(vectorProduct(vectorPoints(p1,p0),vectorPoints(p2,p0)));
+                    vertexData.push(normal[0],normal[1],normal[2]);
+
+                    // Занимаваме се с цветовете
+                    // възможност да се изнесе в шейдър
+                    let zVal = data2[x][y][2];
+                    for (let z = 0; z<3;z++)
+                    {
+                        let snowC = 0;
+                        if (zVal > 40) {snowC = Math.min(-2. + 0.05*zVal,1); }
+
+                        let grassC = Math.max(-9.25085*Math.pow(10,-16) + 0.12*zVal - 0.002*Math.pow(zVal,2),0);
+
+                        let sandC = Math.min(Math.max(1.5625+ 5.78155*Math.pow(10,-17)*zVal - 0.0625*Math.pow(zVal,2),0),1);
+
+                        let seaBottomC = 0;
+                        if (zVal < -5)
+                        {
+                            seaBottomC = 1.07273 + 0.0145455*zVal;
+                        }
+
+                        vertexData.push(snowC*this.snow[z]+grassC*this.grass[z] + sandC*this.sand[z] + seaBottomC*this.seaBottom[z]);
+                    }
+                }
+            }
+
+            // Създаваме буфер за върхове и му придаваме данните
+            this.vertexBuf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER,this.vertexBuf);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertexData), gl.STATIC_DRAW);
+
+            /* ====================== Буфер за елементи ====================== */
+
+            // Масив за данни за върховете
+            let iVertexData = [];
+            // Брояч за върхове
+            let counter = 0;
+
+            // Правим теселация
+            for(let i=0;i<n;i++)
+            {
+                for (let j=0; j<n; j++)
+                {
+                    iVertexData.push(counter,counter+1,counter+n+2);
+                    iVertexData.push(counter+n+2,counter,counter+n+1);
+
+                    ++counter;
+                }
+                ++counter;
+            }
+
+            // Запазваме броя на елементите в локално поле
+            this.numElements = iVertexData.length;
+
+            // Създаваме буфер за елементи и го запазваме на локално ниво
+            this.iVertexBuf1 = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.iVertexBuf1);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(iVertexData), gl.STATIC_DRAW);
+
+            /* ====================== Околните черни стени ====================== */
+
+            // масив за съхранение на стените
+            let wallData = [];
+            // долна граница на стените /съобразено с водата/
+            let depth = -90;
+
+            // добавяме стените /ще рисуваме отново чрез теселация/
+            for (let i = 0; i < n; i++)
+            {
+                let x = 0;
+                //стена А
+                wallData.push(data2[x][i][0],data2[x][i][1],data2[x][i][2]);
+                wallData.push(data2[x][i+1][0],data2[x][i+1][1],data2[x][i+1][2]);
+                wallData.push(data2[x][i][0],data2[x][i][1], depth);
+
+                wallData.push(data2[x][i][0],data2[x][i][1], depth);
+                wallData.push(data2[x][i+1][0],data2[x][i+1][1], depth);
+                wallData.push(data2[x][i+1][0],data2[x][i+1][1],data2[x][i+1][2]);
+
+                // стена Б
+                x = n-3;
+                wallData.push(data2[x][i][0],data2[x][i][1],data2[x][i][2]);
+                wallData.push(data2[x][i+1][0],data2[x][i+1][1],data2[x][i+1][2]);
+                wallData.push(data2[x][i][0],data2[x][i][1], depth);
+
+                wallData.push(data2[x][i][0],data2[x][i][1], depth);
+                wallData.push(data2[x][i+1][0],data2[x][i+1][1], depth);
+                wallData.push(data2[x][i+1][0],data2[x][i+1][1],data2[x][i+1][2]);
+            }
+
+            // още стени
+            for (let i = 0; i < n-3; i++)
+            {
+                // стена В
+                wallData.push(data2[i][0][0],data2[i][0][1],data2[i][0][2]);
+                wallData.push(data2[i+1][0][0],data2[i+1][0][1],data2[i+1][0][2]);
+                wallData.push(data2[i][0][0],data2[i][0][1], depth);
+
+                wallData.push(data2[i][0][0],data2[i][0][1], depth);
+                wallData.push(data2[i+1][0][0],data2[i+1][0][1], depth);
+                wallData.push(data2[i+1][0][0],data2[i+1][0][1],data2[i+1][0][2]);
+
+                // стена Г
+                wallData.push(data2[i][n][0],data2[i][n][1],data2[i][n][2]);
+                wallData.push(data2[i+1][n][0],data2[i+1][n][1],data2[i+1][n][2]);
+                wallData.push(data2[i][n][0],data2[i][n][1], depth);
+
+                wallData.push(data2[i][n][0],data2[i][n][1], depth);
+                wallData.push(data2[i+1][n][0],data2[i+1][n][1], depth);
+                wallData.push(data2[i+1][n][0],data2[i+1][n][1],data2[i+1][n][2]);
+            }
+
+            // Брой точки на околните стени
+            this.numWallVertices = wallData.length;
+
+            // Създаваме буфер за върховете от околните стени и ги запазваме в локално поле
+            this.wallBuf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.wallBuf);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(wallData), gl.STATIC_DRAW);
+
+            this.n = n;
+            this.center = [0,0,0];
+            this.size = 1;
+        };
+
+        // случаен терен - рисуване
+        RandomTerrain.prototype.draw = function()
+        {
+            pushMatrix();
+                translate(this.center);
+                scale([this.size,this.size,this.size]);
+                useMatrix();
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.iVertexBuf1);
+                gl.bindBuffer(gl.ARRAY_BUFFER,this.vertexBuf);
+
+                // подаване на върховете
+                gl.enableVertexAttribArray(aXYZ);
+                gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,9*FLOATS,0);
+
+                // подаване на нормалите
+                gl.enableVertexAttribArray(aNormal);
+                gl.vertexAttribPointer(aNormal,3,gl.FLOAT,false,9*FLOATS,3*FLOATS);
+
+                // подаване на цветове
+                gl.enableVertexAttribArray(aColor);
+                gl.vertexAttribPointer(aColor,3,gl.FLOAT,false,9*FLOATS,6*FLOATS);
+
+                // поради дребни проблеми с gl.UNSIGED_SHORT и невъзможност за употреба на gl.UNSIGNED_INT ги правя тия аритметики
+                gl.drawElements(gl.TRIANGLES, this.numElements - this.n*6*2, gl.UNSIGNED_SHORT, 0);
+
+                // изключвам подаването им
+                gl.disableVertexAttribArray(aColor);
+                gl.disableVertexAttribArray(aNormal);
+                gl.disableVertexAttribArray(aXYZ);
+
+                // рисуваме стените
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.wallBuf);
+
+                // подаваме върховете
+                gl.enableVertexAttribArray(aXYZ);
+                gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,3*FLOATS,0);
+
+                // промяна на цвета
+                gl.vertexAttrib3fv(aColor, [0,0,0]);
+
+                gl.drawArrays(gl.TRIANGLES, 0, this.numWallVertices/3);
+            popMatrix();
+        };
+
+        function start( )
+        {
+            var	canvas = document.getElementById("picasso");
+            canvas.addEventListener('webglcontextlost',function(event){event.preventDefault();},false);
+            canvas.addEventListener('webglcontextrestored',function(){init();},false);
+
+            init();
+            drawFrame();
+        }
+
+        function init()
+        {
+            gl = getContext("picasso");
+            glprog = getProgram(vShader,fShader);
+            getVariables();
+
+            gl.enable(gl.DEPTH_TEST);
+            gl.clearColor(0.8,0.9,1,1);
+
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+            gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+            gl.uniform1i(uUseNormalMatrix,false);
+            gl.uniform3f(uAmbientColor,0.4,0.4,0.4);
+            gl.uniform3f(uDiffuseColor,0.8,0.8,0.8);
+            gl.uniform3f(uLightDir,0,0,-1);
+
+            identity();
+            perspective(30,gl.canvas.width/gl.canvas.height,1,40000);
+
+            // създаване на случаен терен
+            terra = new RandomTerrain();
+
+            water = new Cuboid([-1.4,0,-45],[252.5,255,90]);
+            water.color = [0,0,0.5];
+
+            // масиви за съхранение на данни относно птиците
+            birdOffsets = [];
+            birdCoefficients = [];
+
+            // избор на случаен брой птици
+            numBirds = random(10,15);
+
+            // запазваме данните за птиците
+            for (let i = 0; i < numBirds; ++i)
+            {
+                birdOffsets.push([random(0, 150), random(0, 150), random(0, 150)]);
+                birdCoefficients.push([random(6,32), random(6, 32), random(6, 18)]);
+            }
+
+            // понеже са супер малки ще бъдат с малко на брой стени
+            SPHERE_SIDES = 5;
+
+            // базова птица
+            bird = new Sphere([0,0,0], 0.6);
+            bird.color = [0.1,0.1,0.1];
+        }
+
+        var time = now();
+        function now() { return (new Date()).getTime()/1000; }
+
+        function drawFrame()
+        {
+            time = now();
+            gl.clear(gl.COLOR_BUFFER_BIT+gl.DEPTH_BUFFER_BIT);
+
+            lookAt([250*cos(time/3),450*sin(time/3),200+100*sin(time/2)],[0,0,0],[0,0,1]);
+
+            gl.depthMask(true);
+            gl.uniform1f(uAlpha,1);
+            // рисуване на терена
+            terra.draw();
+
+            // рисуване на птичките
+            for (let i = 0; i < numBirds; ++i)
+            {
+                bird.center[0] = terra.highestVertex[0] + birdCoefficients[i][0]*Math.cos(time/2 + birdOffsets[i][0]);
+                bird.center[1] = terra.highestVertex[1] + birdCoefficients[i][1]*Math.sin(time/2 + birdOffsets[i][1]);
+                bird.center[2] = 15 + terra.highestVertex[2] + birdCoefficients[i][2]*Math.cos(time/2 + birdOffsets[i][2]);
+
+                bird.draw();
+            }
+
+            gl.depthMask(false);
+            gl.uniform1f(uAlpha,0.6);
+
+            // рисуване на водата
+            water.draw();
+
+            requestAnimationFrame(drawFrame);
+        }
+    </script>
+</head>
+
+<body onload="start()">
+<h2>Заливът</h2>
+
+<noscript>
+    Искаме JavaScript, но няма!
+</noscript>
+
+<canvas id="picasso" width="600" height="400" style="border: solid;">
+    Искаме canvas, но няма!
+</canvas>
+</body>

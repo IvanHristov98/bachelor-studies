@@ -1,0 +1,231 @@
+﻿<!DOCTYPE html>
+
+<head>
+	<meta charset="utf-8"/>
+	<title>Стената</title>
+
+	<script src="webgl-fmi.js"></script>	
+	
+	<script id="vshader" type="x-shader/x-vertex">
+		uniform mat4 uProjectionMatrix;
+		uniform mat4 uViewMatrix;
+		uniform mat4 uModelMatrix;
+		attribute vec3 aXYZ;
+		void main ()
+		{
+			vec2 q = normalize(vec2(-aXYZ.y, aXYZ.x));
+
+			gl_Position = uProjectionMatrix * uViewMatrix * uModelMatrix * vec4(q.x, q.y, aXYZ.z, 1);
+		}
+	</script>
+	
+	<script id="fshader" type="x-shader/x-fragment">
+		precision mediump float;
+		uniform vec3 uColor;
+		void main( )
+		{
+			gl_FragColor = vec4(uColor,1);
+		}
+	</script>
+
+	<script>
+		function cube()
+		{
+            useMatrix();
+            gl.drawArrays(gl.LINE_LOOP,0,4);
+            gl.drawArrays(gl.LINE_LOOP,4,4);
+            gl.drawArrays(gl.LINES,8,8);
+		}
+
+		function calcDistance(a, b)
+		{
+		    return Math.sqrt(Math.pow(a[0] - b[0], 2) + Math.pow(a[1] - b[1], 2));
+		}
+
+		function calcHeartTop(i, heartPrecision)
+		{
+            let x = 2*i/heartPrecision;
+            let y = Math.sqrt(1-Math.pow(Math.abs(x) - 1,2));
+
+		    return [12*x, 12*y];
+		}
+
+        function calcHeartBottom(i, heartPrecision)
+        {
+            let x = 2*i/heartPrecision;
+            let y = -3*Math.sqrt(1-Math.sqrt(Math.abs(x))/Math.sqrt(2)) + 0.1;
+
+            return [12*x, 12*y];
+        }
+
+        function drawWall(heart2, gapPoint, brickLength, floorHeight, extraTranslation = [0,0,0])
+        {
+
+            // Пресмятаме ъгъла между междинната средната точки
+            let pivotPoint = [heart2[0], gapPoint[1]];
+            let sideA = calcDistance(heart2, gapPoint);
+            let sideB = calcDistance(heart2, pivotPoint);
+            let sideC = calcDistance(pivotPoint, gapPoint);
+            let angleC = Math.acos((Math.pow(sideA, 2) + Math.pow(sideB, 2) - Math.pow(sideC, 2))/(2*sideA*sideB));
+
+            angleC *= 180/Math.PI;
+
+            // Проверява дали ъгъла е обратен
+            if (heart2[0] > gapPoint[0] && heart2[1] < gapPoint[1])
+            {
+                angleC = -angleC;
+            }
+
+            // Нулираме междинната точка
+            gapPoint.length = 0;
+
+            // Трансформираме паралелепипеда
+            translate([heart2[0] + extraTranslation[0], heart2[1] + extraTranslation[1], floorHeight + extraTranslation[2]]);
+            zRotate(angleC);
+            scale([0.3, 1, 0.5]);
+            useMatrix();
+            cube();
+            scale([1/0.3, 1, 1/0.5]);
+            zRotate(-angleC);
+            translate([-heart2[0] - extraTranslation[0], -heart2[1] - extraTranslation[1], -floorHeight - extraTranslation[2]]);
+        }
+
+		function start( )
+		{
+			gl = getContext("picasso");
+			glprog = getProgram("vshader","fshader");
+			
+			aXYZ = gl.getAttribLocation(glprog,"aXYZ");
+			uColor = gl.getUniformLocation(glprog,"uColor");
+			uProjectionMatrix = gl.getUniformLocation(glprog,"uProjectionMatrix");
+			uViewMatrix = gl.getUniformLocation(glprog,"uViewMatrix");
+			uModelMatrix = gl.getUniformLocation(glprog,"uModelMatrix");
+
+			gl.clearColor(1,1,1,1);
+			gl.clear(gl.COLOR_BUFFER_BIT);
+
+			var proj = perspMatrix(30,gl.canvas.width/gl.canvas.height,1,40000);
+			gl.uniformMatrix4fv(uProjectionMatrix,false,proj);
+
+            // Гледане отгоре view
+            var view = viewMatrix([0,0,110], [3,-10,-5], [0,5,0]);
+			gl.uniformMatrix4fv(uViewMatrix,false,view);
+
+			// куб 1x1x1
+			var data = [ 0.5,-0.5,0.5,	// предна стена
+						 0.5,0.5,0.5,
+						-0.5,0.5,0.5,
+						-0.5,-0.5,0.5,
+						 0.5,-0.5,-0.5, // задна стена
+						 0.5,0.5,-0.5,
+						-0.5,0.5,-0.5,
+						-0.5,-0.5,-0.5,
+						
+						 0.5,-0.5,0.5, // десни хоризонтални ръбове
+						 0.5,-0.5,-0.5,
+						 0.5,0.5,0.5,
+						 0.5,0.5,-0.5,
+						-0.5,0.5,0.5,	// леви хоризонтални ръбове
+						-0.5,0.5,-0.5,
+						-0.5,-0.5,0.5,
+						-0.5,-0.5,-0.5
+						];
+			var buf = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+
+			gl.enableVertexAttribArray(aXYZ);
+			gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,0,0);
+
+			gl.uniform3f(uColor,0.5,0,0);
+
+			// Вместо единичен куб, да се нарисува стена под формата на сърце
+			// от 20 реда застъпващи се тухли, използвайки трансформиран куб
+			identity();
+			// Задавен на еднакъв мащаб на всички тухли
+
+			// Прецизност на чертане на графиката на сърцето
+			let heartPrecision = 1000;
+			// Дължина на една тухла, включително и луфтовете
+			let brickLength = 1.8;
+			// Брой етажи
+			let floors = 20;
+			// Височина на един етаж
+			let floorHeight = 0.5;
+
+			for (let i = 0; i < floors; ++i)
+			{
+			    // Избиране на първоначална измината дистанция по функцията, като чрез деленето по модул
+                // се получава застъпването.
+                let passedDistance = (i%2)*brickLength/2;
+                // Междинна точка на две тухли
+                let gapPoint = [];
+
+                // Първо смятаме долната част на сърцето
+                for (let j = -heartPrecision + 1; j < heartPrecision; ++j)
+                {
+                    // Предна точка от графиката
+                    let heart1 = calcHeartBottom(j - 1, heartPrecision);
+                    // Настояща точка от графиката
+                    let heart2 = calcHeartBottom(j, heartPrecision);
+                    // Добавяме разстоянието между двете точки от графиката към вече изминатото
+                    passedDistance += calcDistance(heart1, heart2);
+
+                    // Ако изминатото разстояние е по-голямо от поливаната дължина на тухла и не е зададена
+                    // средна точка, то задаваме такава.
+                    if (passedDistance > brickLength/2 && gapPoint.length === 0)
+                    {
+                        gapPoint = heart2;
+                    }
+
+                    if (passedDistance> brickLength)
+                    {
+                        // Нулираме изминатото разстояние
+                        passedDistance = 0;
+                        // Рисуваме стената
+                        drawWall(heart2, gapPoint, brickLength, i*floorHeight, [0, brickLength/2, 0]);
+                    }
+                }
+
+                passedDistance = (i%2)*brickLength/2;
+
+                // Сега пресмятаме горната част
+                for (let j = -heartPrecision + 1; j < heartPrecision; ++j)
+                {
+                    // Предна точка от графиката
+                    let heart1 = calcHeartTop(j - 1, heartPrecision);
+                    // Настояща точка от графиката
+                    let heart2 = calcHeartTop(j, heartPrecision);
+                    // Добавяме разстоянието между двете точки от графиката към вече изминатото
+                    passedDistance += calcDistance(heart1, heart2);
+
+                    // Аналогично нагласяме междинната точка на тухлите.
+                    if (passedDistance > brickLength/2 && gapPoint.length === 0)
+                    {
+                        gapPoint = heart2;
+                    }
+
+                    if (passedDistance > brickLength)
+                    {
+                        // Нулираме изминатото разстояние
+                        passedDistance = 0;
+                        // Рисуваме стената
+                        drawWall(heart2, gapPoint, brickLength, floorHeight*i);
+                    }
+                }
+			}
+		}
+	</script>	
+</head>
+
+<body onload="start()">
+	<h2>Стената</h2>
+
+	<noscript>
+		Искаме JavaScript, но няма!
+	</noscript>
+	
+	<canvas id="picasso" width="600" height="400" style="border: solid;">
+		Искаме canvas, но няма!
+	</canvas>
+</body>

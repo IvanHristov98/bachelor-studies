@@ -1,0 +1,184 @@
+﻿	<!DOCTYPE html>
+
+<head>
+	<meta charset="utf-8"/>
+	<title>Шарнирен робот</title>
+
+	<script src="webgl-fmi.js"></script>
+	<script src="diffuse_shaders.js"></script>
+	<script src="skeleton.js"></script>
+	
+	<script>
+		function start( )
+		{
+			var	canvas = document.getElementById("picasso");
+			canvas.addEventListener('webglcontextlost',function(event){event.preventDefault();},false);
+			canvas.addEventListener('webglcontextrestored',function(){init();},false);
+
+			init();
+			drawFrame();
+		}
+		
+		function init()
+		{
+		    // Аудио
+			evilMonster = document.getElementById("evil-monster");
+			robotSounds = [].concat(
+			    document.getElementById("fizzle"),
+				document.getElementById("short-circuit")
+			);
+
+			canPlaySound = false;
+
+			gl = getContext("picasso");
+            glprog = getProgram(vShader,fShader);
+			getVariables();
+
+			gl.enable(gl.DEPTH_TEST);
+			gl.clearColor(1,1,1,1);
+
+			identity();
+			perspective(30,gl.canvas.width/gl.canvas.height,1,40000);
+			gl.uniform1i(uUseNormalMatrix,false);
+
+			gl.uniform3f(uAmbientColor,0.3,0.3,0.3);
+			gl.uniform3f(uDiffuseColor,0.8,0.8,0.8);
+			gl.uniform3f(uLightDir,0,0,-1);
+
+			// модел на робота
+			// за да не стои грозен коноида
+            CONE_SIDES = 50;
+            // набор от цветове
+			let ironColor = [0.7,0.7,0.7];
+			let boltColor = [0.85,0.83,0.73];
+			let jointColor = [0,0,0.7];
+			let ringRed = [0.6,0,0];
+			let ringGreen = [0,0.8,0];
+			let ringYellow = [0.6,0.6,0];
+
+			// Основата на робота
+			foundation = new Bone(5.3, [
+			    custom(new Cylinder([0,0,0],4,1), {color:ironColor}),
+				custom(new Conoid([0,0,1],[4,4,0.3],[0.2,0.2]), {color:ironColor}),
+				custom(new Cylinder([0,0,1.3],0.8,4), {color:ironColor}),
+			]);
+
+			// Кубоидния болт
+			bolt1 = new Bone(2, [custom(new Cuboid([0,0,0], [4,4,2]), {color:boltColor})]);
+
+			// Първата колянна връзка
+			joint1 = new Bone(8, [
+			    custom(new Cylinder([0,-2.75,0],2,0.5), {color:jointColor, rot: [90,90,0]}),
+                custom(new Cylinder([0,3.25,0],2,0.5), {color:jointColor, rot: [90,90,0]}),
+                custom(new Cylinder([0,2.75,0],2,5.5), {color:ironColor, rot: [90,90,0], hollow:true}),
+				custom(new Cuboid([0,3,3.25], [4,0.5,7]), {color:jointColor}),
+                custom(new Cuboid([0,-3,3.25], [4,0.5,7]), {color:jointColor}),
+                custom(new Cylinder([0,-2.75,6.75],2,0.5), {color:jointColor, rot: [90,90,0]}),
+                custom(new Cylinder([0,3.25,6.75],2,0.5), {color:jointColor, rot: [90,90,0]}),
+                custom(new Cylinder([0,2.75,6.75],2,5.5), {color:ironColor, rot: [90,90,0], hollow:true}),
+			]);
+
+			// Втория кубоидет болт
+			bolt2 = new Bone(2, [custom(new Cuboid([0,0,1], [4,4,2]), {color:boltColor})]);
+
+			// Оная цветна тръба
+			colourfulHandle = [
+			    new Bone(1, [custom(new Cylinder([0,0,0], 0.8, 1), {color:ironColor, hollow:true})]),
+				new Bone(0.4, [custom(new Cylinder([0,0,0], 0.8, 0.4), {color:ringRed, hollow:true})]),
+				new Bone(2, [custom(new Cylinder([0,0,0], 0.8, 2), {color:ringGreen, hollow:true})]),
+                new Bone(0.4, [custom(new Cylinder([0,0,0], 0.8, 0.4), {color:ringRed, hollow:true})]),
+                new Bone(0.6, [custom(new Cylinder([0,0,0], 0.8, 0.6), {color:ironColor, hollow:true})]),
+                new Bone(0.4, [custom(new Cylinder([0,0,0], 0.8, 0.4), {color:ringYellow, hollow:true})]),
+                new Bone(3, [custom(new Cylinder([0,0,0], 0.8, 3), {color:ringGreen, hollow:true})]),
+			];
+
+			// Коляно 2
+			joint2 = new Bone(7,[
+				custom(new Cylinder([0,3.25,0],2,6.5), {color:ironColor, rot: [90,90,0]}),
+				custom(new Cuboid([0,3,3.25], [4,0.5,7]), {color:ironColor}),
+				custom(new Cuboid([0,-3,3.25], [4,0.5,7]), {color:ironColor}),
+			]);
+
+			// Последния болт, този път кръгъл
+			bolt3 = new Bone(5.25,[
+			    custom(new Cuboid([0,0,0], [4,6.5,0.5]), {color:ironColor}),
+				custom(new Cylinder([0,0,0.25],2,5), {color:ironColor, hollow:true})
+			]);
+
+			// Червената капачка дето се върти накрая
+			redCap = new Bone(2, [
+			    custom(new Cylinder([0,0,0],2,0.75), {color:ringRed}),
+				custom(new Cuboid([0,0,1], [1,3,1], {color:ringYellow})),
+				custom(new Cuboid([0,0,1], [3,1,1], {color:ringYellow})),
+			]);
+		}
+
+		function now() { return (new Date()).getTime()/1000; }
+		
+		function drawFrame()
+		{
+			let time = now();
+			
+			gl.clear(gl.COLOR_BUFFER_BIT+gl.DEPTH_BUFFER_BIT);
+
+			lookAt([60,60,30],[0,0,1],[0,0,1]);
+
+			// завъртаме болтовете
+			bolt1.rot = [0,0,0,540*Math.sin(time/4)];
+			joint1.rot = [0,50*Math.cos(time/2),0,0];
+			bolt2.rot = [0, 50*Math.sin(time),0,0];
+			joint2.rot = [720*Math.cos(time/8), 60*Math.sin(time),0,0];
+			redCap.rot[3] += 5;
+
+			// Рисуваме отделните кокали
+			pushMatrix();
+				translate([0,0,-20]);
+				foundation.draw();
+				bolt1.draw();
+				joint1.draw();
+				bolt2.draw();
+				for (let i = 0; i < colourfulHandle.length; ++i) { colourfulHandle[i].draw(); }
+				joint2.draw();
+				bolt3.draw();
+				redCap.draw();
+			popMatrix();
+
+			// звук
+			if (canPlaySound)
+			{
+			    robotSounds[Math.floor(Math.random()*robotSounds.length)].play();
+			}
+
+			requestAnimationFrame(drawFrame);
+		}
+
+        document.onclick= function() {
+            evilMonster.play();
+            canPlaySound = true;
+        };
+	</script>	
+</head>
+
+<body onload="start()">
+	<h2>X-Ptarmi 6AN</h2>
+
+	<noscript>
+		Искаме JavaScript, но няма!
+	</noscript>
+	
+	<canvas id="picasso" width="600" height="400" style="border: solid;">
+		Искаме canvas, но няма!
+	</canvas>
+	<br/>
+	<button>Звукови ефекти</button>
+
+	<audio id="evil-monster">
+		<source src="sounds/evil_monster.mp3" type="audio/mp3">
+	</audio>
+	<audio id="fizzle">
+		<source src="sounds/fizzle.mp3" type="audio/mp3">
+	</audio>
+	<audio id="short-circuit">
+		<source src="sounds/short_circuit.mp3" type="audio/mp3">
+	</audio>
+</body>

@@ -1,0 +1,273 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8"/>
+	<title>Кълбото</title>
+
+	<script src="webgl-fmi.js"></script>
+	<script src="shaders.js"></script>
+
+	<script>
+		// небесен куб - конструктор
+		Skybox = function(center,size, lvl)
+		{
+		    // ще го генерираме по подобен начин както геодезичната сфера
+            var data = [];
+            var n = 0;
+
+            // намира среда на отсечка
+            function getMiddlePoint(p, q)
+            {
+                return [(p[0]+q[0])/2, (p[1]+q[1])/2, (p[2]+q[2])/2];
+            }
+
+            // рекурсивна функция за разбиване на триъгълници на подтриъгълници
+            function triangulize(p1,p2,p3, level)
+            {
+                if (level)
+                {
+                    let mid12 = getMiddlePoint(p1, p2);
+                    let mid13 = getMiddlePoint(p1, p3);
+                    let mid23 = getMiddlePoint(p2, p3);
+                    --level;
+
+                    triangulize(p1, mid12, mid13, level);
+                    triangulize(mid12, p2, mid23, level);
+                    triangulize(mid13, mid12, mid23, level);
+                    triangulize(mid13, p3, mid23, level);
+                }
+                else
+                {
+                    p1 = unitVector(p1);
+                    p2 = unitVector(p2);
+                    p3 = unitVector(p3);
+
+                    data.push(
+                        p1[0], p1[1], p1[2],
+                        p2[0], p2[1], p2[2],
+                        p3[0], p3[1], p3[2],
+                    );
+                    ++n;
+                }
+            }
+
+			// предефинирани върхове на куб
+			var v = [ [+0.5,-0.5,-0.5], [+0.5,+0.5,-0.5],
+					  [-0.5,+0.5,-0.5], [-0.5,-0.5,-0.5],
+					  [+0.5,-0.5,+0.5], [+0.5,+0.5,+0.5],
+					  [-0.5,+0.5,+0.5], [-0.5,-0.5,+0.5] ];
+			// и сега си генерираме купола
+            triangulize(v[0], v[1], v[4], lvl);
+            triangulize(v[4], v[1], v[5], lvl);
+            triangulize(v[6], v[2], v[7], lvl);
+            triangulize(v[7], v[2], v[3], lvl);
+
+            triangulize(v[5], v[1], v[6], lvl);
+            triangulize(v[6], v[1], v[2], lvl);
+            triangulize(v[4], v[7], v[0], lvl);
+            triangulize(v[0], v[7], v[3], lvl);
+
+            triangulize(v[4], v[5], v[7], lvl);
+            triangulize(v[7], v[5], v[6], lvl);
+            triangulize(v[0], v[3], v[1], lvl);
+            triangulize(v[1], v[3], v[2], lvl);
+
+			var buf = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+			gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+			this.buf = buf;
+			this.center = center;
+			this.size = size;
+			this.texture = undefined; // неизвестна текстура
+			// добавяме пазене на цвят и брой точки триъгълничета
+			this.color = [1,1,1];
+			this.n = n;
+		};
+
+		// небесен куб - метод за рисуване
+		Skybox.prototype.draw = function()
+		{
+			pushMatrix();
+				translate(this.center);
+				scale(this.size);
+				xRotate(-90);
+				useMatrix();
+
+				gl.bindBuffer(gl.ARRAY_BUFFER,this.buf);
+				gl.enableVertexAttribArray(aXYZ);
+				gl.vertexAttribPointer(aXYZ,3,gl.FLOAT,false,3*FLOATS,0*FLOATS);
+
+				gl.enableVertexAttribArray(aNormal);
+				gl.vertexAttribPointer(aNormal,3,gl.FLOAT,false,3*FLOATS, 0*FLOATS);
+
+				// подаваме цвета към шейдъра
+				gl.vertexAttrib3fv(aColor, this.color);
+
+				// казваме къде са текстурите, ако всичките 6 са вече заредени
+				if (gl.isTexture(this.texture) && !this.texture.count)
+				{
+					gl.bindTexture(gl.TEXTURE_CUBE_MAP,this.texture);
+                    gl.drawArrays(gl.TRIANGLES,0,3*this.n);
+				}
+			popMatrix();
+		};
+
+
+
+		// създаване на празна кубична текстура
+		function texture3D()
+		{
+			var texture = gl.createTexture();
+			texture.count = 6;
+			return texture;
+		}
+
+		// заявка за зареждане на една от 6-те текстури на кубична подтекстура
+		function loadTexture3D(texture,side,url)
+		{
+			var image = new Image();
+			image.onload = function()
+			{
+				imageLoaded3D(texture,image,side);
+			};
+			image.src = url;
+		}
+
+		// функция, която се извиква при зареждането на кубична текстура
+		function imageLoaded3D(texture,image,side)
+		{
+			gl.bindTexture(gl.TEXTURE_CUBE_MAP, texture);
+//			gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+			gl.texImage2D(side, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+			texture.count--;
+			if (texture.count === 0)
+			{
+				gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
+				gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+				gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+			}
+			gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
+		}
+
+		function start( )
+		{
+			var	canvas = document.getElementById("picasso");
+			canvas.addEventListener('webglcontextlost',function(event){event.preventDefault();},false);
+			canvas.addEventListener('webglcontextrestored',function(){init();},false);
+
+			init();
+			drawFrame();
+		}
+
+		function init()
+		{
+			gl = getContext("picasso");
+			glprog = getProgram(vShader,fShader);
+			getVariables();
+
+			gl.enable(gl.DEPTH_TEST);
+			gl.clearColor(1,1,1,1);
+
+			identity();
+			perspective(30,gl.canvas.width/gl.canvas.height,1,40000);
+
+			// насока на светлината
+			gl.uniform3fv(uLightDir, [-1,-1,-1]);
+			// дифузен цвят
+            gl.uniform3f(uDiffuseColor, 1,1,1);
+            // огледален цвят - леко жълтеникав
+            gl.uniform3f(uSpecularColor, 0.5,0.5,0.45);
+            // степен на отражателност
+            gl.uniform1f(uShininess, 7);
+            // степен на замазаност
+            gl.uniform1f(uBlurRate, 0.006);
+
+			// използваме модул №0 за текстури
+			gl.activeTexture(gl.TEXTURE0);
+			gl.uniform1i(uTexUnit, 0);
+
+			// дефиниране на небесен куб
+			sky = new Skybox([0,0,0],[10,10,10], 5);
+
+			// зареждане на 6-те текстури
+			sky.texture = texture3D();
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_POSITIVE_X,'img/posx.jpg');
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_NEGATIVE_X,'img/negx.jpg');
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_POSITIVE_Y,'img/posy.jpg');
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_NEGATIVE_Y,'img/negy.jpg');
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_POSITIVE_Z,'img/posz.jpg');
+			loadTexture3D(sky.texture,gl.TEXTURE_CUBE_MAP_NEGATIVE_Z,'img/negz.jpg');
+
+			// дефинираме творението на Феанор от елфите на Валинор
+			palantir = new Skybox([0,0,0], [0.5,0.5,0.5], 5);
+			palantir.texture = sky.texture;
+
+			// магия - улавяне на движението на мишката
+			gl.canvas.addEventListener("mousemove", mouseMove);
+		}
+
+
+		// магия - движение на мишката
+		var a=0, b=0, dA=0.1, dB=0;
+		function mouseMove(event)
+		{
+			dA = (gl.canvas.width/2-(event.clientX-gl.canvas.offsetLeft))/400;
+			dB = (gl.canvas.height/2-(event.clientY-gl.canvas.offsetTop))/300;
+		}
+
+		var time = now();
+		var dT = 0;
+		function now() { return (new Date()).getTime()/1000; }
+
+		function drawFrame()
+		{
+			var oldTime = time;
+			time = now();
+			dT = time-oldTime;
+			gl.clear(gl.COLOR_BUFFER_BIT+gl.DEPTH_BUFFER_BIT);
+
+			// въртене на сцената
+			a += dA*dT; // хоризонтално
+			b -= dB*dT; // вертикално
+			if (b>1.5) b=1.5;   // вертикално сме винаги в диапазона
+			if (b<-1.5) b=-1.5; // от около -пи/2 до пи/2
+
+			// попроменена камера за отдалечаване от центъра с малко за да се вижда палантира
+			lookAt([-3*cos(a)*cos(b),-3*sin(a)*cos(b),-3*sin(b)],[-cos(a)*cos(b),-sin(a)*cos(b),-sin(b)],[0,0,1]);
+
+			// рисуване на сферата
+			// без размазване
+            gl.uniform1i(uUseBlur, 0);
+            // нека стъклената топка бъде малко по светла
+            gl.uniform3fv(uAmbientColor, [0.9,0.9,0.9]);
+            // ще използваме огледална светлина за топката
+			gl.uniform1f(uUseSpecular, 1);
+            palantir.draw();
+
+			// рисуване на небесния купол
+			// нека има размазване
+			gl.uniform1i(uUseBlur, 1);
+			// малко по-тъмна околна светлина
+            gl.uniform3fv(uAmbientColor, [0.6,0.6,0.6]);
+            // няма да използваме огледална светлина
+            gl.uniform1f(uUseSpecular, 0);
+			sky.draw();
+
+			requestAnimationFrame(drawFrame);
+		}
+	</script>
+</head>
+
+<body onload="start()">
+	<h2>Кълбото</h2>
+
+	<noscript>
+		Искаме JavaScript, но няма!
+	</noscript>
+
+	<canvas id="picasso" width="1200" height="720" style="border: solid;">
+		Искаме canvas, но няма!
+	</canvas>
+	<div><small><i>Сцената се върти с движение на мишката.</i></small></div>
+</body>
+</html>

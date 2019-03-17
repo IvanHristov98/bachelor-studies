@@ -1,0 +1,153 @@
+﻿<!DOCTYPE html>
+
+<head>
+	<meta charset="utf-8"/>
+	<title>Чергата</title>
+
+	<script src="webgl-fmi.js"></script>	
+	
+	<script id="vshader" type="x-shader/x-vertex">
+		attribute vec2 aXY;
+		attribute vec3 aRGB;
+		varying vec3 vRGB;
+		void main ()
+		{
+			gl_Position = vec4(aXY,0,1);
+			gl_PointSize = 4.0;
+			vRGB = aRGB;
+		}
+	</script>
+	
+	<script id="fshader" type="x-shader/x-fragment">
+		precision mediump float;
+		varying vec3 vRGB;
+		void main( )
+		{
+			gl_FragColor = vec4(vRGB,1);
+		}
+	</script>
+
+	<script>
+		function start( ) {
+            gl = getContext("picasso");
+            glprog = getProgram("vshader", "fshader");
+
+            // локиране на атрибутни променливи
+            var aXY = gl.getAttribLocation(glprog, "aXY");
+            var aRGB = gl.getAttribLocation(glprog, "aRGB");
+
+            gl.clearColor(random(0.5, 0.9), random(0.5, 0.9), random(0.5, 0.9), 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            // брой ленти m
+            var m = 11;
+            // масив за пазене на данни за всяка точка
+            var data = [];
+            // параметър за точност на чертане на синусоидата
+            var sinePunctuality = 100;
+
+            // по един път за всяка синусоида
+            for (let i = -m/2; i < m/2; ++i)
+            {
+                // определя честотата на срещане на вълничките
+                let frequencyRate = random(0.8, 3);
+                // определя дължината в радиус на всяка синусоида
+                let length = getRandomArrayElement([random(-1/(m*2), -1/(m)), random(1/m, 1/(m*2))]);
+
+                // смятане синусиодиата
+                for (let j = -sinePunctuality; j <= sinePunctuality; ++j)
+                {
+                    let x = length * Math.sin(frequencyRate * Math.PI * j / sinePunctuality) + i/(m/2 - 0.5) + 1/m;
+                    let y = j/sinePunctuality;
+
+                    data.push(x, y);
+                }
+            }
+
+            // създаване на буфер
+			var buffer = gl.createBuffer();
+			gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+
+			// нагласяне на структурата така, че да приема всяка точка
+			gl.vertexAttribPointer(aXY, 2, gl.FLOAT, false, 0, 0);
+
+			for (let i = 0; i < m - 1; ++i)
+            {
+                // вземане на лява синусоида
+                let leftSine = data.slice((data.length * i) / m, (data.length * (i + 1)) / m);
+                // взимане на дясна синусоида
+                let rightSine = data.slice((data.length * (i + 1)) / m, (data.length * (i + 2)) / m);
+                // заделяне на памет за парче от чергата
+                let strip = [];
+
+                // оформяне на парчето с точки
+                for (let j = 0; j < data.length / m; j += 2)
+                {
+                    strip.push(leftSine[j], leftSine[j + 1]);
+                    strip.push(rightSine[j], rightSine[j + 1]);
+                }
+
+                gl.enableVertexAttribArray(aXY);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(strip), gl.STATIC_DRAW);
+
+                // Чертане на парчето със случаен млечен цвят
+                gl.vertexAttrib3f(aRGB, random(0.5, 0.9), random(0.5, 0.9), random(0.5, 0.9));
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, strip.length / 2);
+
+                gl.disableVertexAttribArray(aXY);
+            }
+
+            // Инициализиране на променлива държаща полуширината по подразбиране на една лайсна
+            var liceHalfWidth = 0.015;
+
+            // чертане на лайсните
+            for (let i = 0; i < m; ++i)
+            {
+                // Извличане на дадена синусоида от набора налични синусоиди
+                let sine = data.slice((data.length * i) / m, (data.length * (i + 1)) / m);
+                // инициализиране на празен масив от лайсни
+                let lice = [];
+
+                // оформяне на лайсната аналогично на всяко от парчетата черга
+                for (let j = 0; j < sine.length; j += 2)
+                {
+                    lice.push(sine[j] - liceHalfWidth, sine[j + 1]);
+                    lice.push(sine[j] + liceHalfWidth, sine[j + 1]);
+                }
+
+                // чертане на лайсната
+                gl.enableVertexAttribArray(aXY);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lice), gl.STATIC_DRAW);
+                gl.vertexAttribPointer(aXY, 2, gl.FLOAT, false, 0, 0);
+                gl.vertexAttrib3f(aRGB, 1, 1, 1);
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, lice.length / 2);
+                gl.disableVertexAttribArray(aXY);
+
+                // чертане на черен контур отляво на лайсната
+                gl.vertexAttrib3f(aRGB, 0.1, 0.1, 0.1);
+                gl.enableVertexAttribArray(aXY);
+                gl.vertexAttribPointer(aXY, 2, gl.FLOAT, false, 4 * FLOAT_SIZE, 0);
+                gl.drawArrays(gl.LINE_STRIP, 0, sine.length / 2);
+                gl.disableVertexAttribArray(aXY);
+
+                // чертане на черен контур отдясно на лайсната
+                gl.enableVertexAttribArray(aXY);
+                gl.vertexAttribPointer(aXY, 2, gl.FLOAT, false, 4 * FLOAT_SIZE, 2 * FLOAT_SIZE);
+                gl.drawArrays(gl.LINE_STRIP, 0, sine.length / 2);
+                gl.disableVertexAttribArray(aXY);
+            }
+		}
+	</script>	
+</head>
+
+<body onload="start()">
+	<h2>Чергата</h2>
+
+	<noscript>
+		Искаме JavaScript, но няма!
+	</noscript>
+	
+	<canvas id="picasso" width="600" height="400" style="border: solid;">
+		Искаме canvas, но няма!
+	</canvas>
+</body>

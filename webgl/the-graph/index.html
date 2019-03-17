@@ -1,0 +1,446 @@
+﻿<!DOCTYPE html>
+
+<!-- Ами това е началният код. Няма почти нищо в него, затова
+го напълнете с каквото счетете за подходящо. Тъй вярно, сър! -->
+
+<head>
+	<meta charset="utf-8"/>
+	<title>Графиката</title>
+
+	<script src="webgl-fmi.js"></script>
+	<script src="shaders.js"></script>
+
+	<style>
+		canvas {
+			display: block;
+			position: fixed;
+			left: 30px;
+			top: 30px;
+			margin: auto;
+			/* това малко замазваше работите */
+			width: calc(100% - 60px);
+			height: calc(100% - 60px);
+			box-shadow: 0 0 6em DarkBlue;
+			color:black;
+		}
+
+		/* мои си нещица */
+		span {
+			position: absolute;
+			top:100%;
+			font-size: 15px;
+		}
+
+		/*при начало е с дължина нула и понеже е малко тежка програмата е препоръчително да се дърпа бавно за слайдерите*/
+		div.slider {
+			position:fixed;
+			top: calc(79% - 29px);
+			height: 21%;
+			padding: 0;
+			margin: 0;
+			width: 0;
+			cursor: w-resize;
+		}
+
+		div.left-slider {
+			left: 30px;
+			border-right: 15px solid darkblue;
+			background-image: linear-gradient(to right, rgba(0,0,0,0), rgba(0,0,230,0.6));
+		}
+
+		div.left-slider > span{
+			right: 0;
+		}
+
+		div.right-slider {
+			right: 29px;
+			border-left: 15px solid darkblue;
+			background-image: linear-gradient(to left, rgba(0,0,0,0), rgba(0,0,230,0.6));
+		}
+
+		div.right-slider > span{
+			left: 0;
+		}
+
+		div.title
+		{
+			position: fixed;
+			right: 40px;
+			top: 40px;
+			font-size: 2em;
+			font-family: Calibri;
+		}
+	</style>
+
+	<script>
+		// за пазене на обектите
+        var objects = [];
+        var numObjects = random(5,10);
+		// пазят коефициенти на приближение
+        var leftZoom = 0;
+        var rightZoom = 0;
+        // за проверка дали се дърпа
+        var drag = false;
+        // позиция на мишката
+        var mouseX = 0;
+        // първоначални максимални и минималния позиции - ползват се при чертане на минимапа
+        var initialMaxValue = null;
+        var initialMinValue = null;
+
+        // функцията, по която се чертаят графиките
+        function getGraphVal(x, offset, period, mainOffset, secOffset)
+        {
+            let curlFunc = Math.sin(x/period*4 + secOffset);
+            return Math.sin(x/period*4 + offset)*mainOffset + 0.5*curlFunc*(mainOffset*Math.sin(secOffset/10));
+        }
+
+        // Обект за някаква графика
+		// ПС - Кръстих го Sine понеже приличат на синусоиди
+        Sine = function(numDots, offset, step, size)
+		{
+		    // тука пълня с точки
+		    this.data = [];
+
+		    // просто си запълваме точките
+            for (let i = 0; i < numDots; ++i) { this.data.push(0,0,0); }
+
+            // създаваме си буфер и продължаваме по стандартната процедура
+			this.buffer = gl.createBuffer();
+		    gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+		    // ще ползваме динамично рисуване при промяна на размера на прозореца
+		    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.data), gl.DYNAMIC_DRAW);
+
+		    // запазваме 'малко' параметри
+		    this.offset = offset;
+			this.step = step;
+			this.size = size;
+		    this.color = [Math.random(), Math.random(), Math.random()];
+		    this.miniColor = [0.5,0.5,0.5];
+		    this.useMini = false;
+		    this.numDots = numDots;
+		    this.minVal = 0;
+		    this.maxVal = 0;
+		};
+
+		Sine.prototype.draw = function()
+		{
+		    // връзваме буфера
+		    gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+			// подаваме върховете
+			gl.enableVertexAttribArray(aXYZ);
+			gl.vertexAttribPointer(aXYZ, 3, gl.FLOAT, false, 3*FLOATS, 0*FLOATS);
+			// нагласяме цвета според това дали рисуваме 'минимапа' или нормалните функции
+			if (!this.useMini)
+			{
+                gl.vertexAttrib3fv(aColor, this.color);
+			}
+			else { gl.vertexAttrib3fv(aColor, this.miniColor);}
+
+			// подаваме текущата матрица на трансформации
+			useMatrix();
+			// рисуваме
+			gl.drawArrays(gl.LINE_STRIP, 0, this.numDots);
+			// спираме подаването
+			gl.disableVertexAttribArray(aXYZ);
+		};
+
+		// За промяна на буфера при преоразмеряване на екрана
+		Sine.prototype.change = function()
+		{
+		    // анулираме текущите данни
+		    this.data = [];
+		    //просто параметър за получаване на накъдреност
+            let secondOffset = Math.PI*2/3;
+
+            // полета за пазене на текущия максимум
+			this.minVal = null;
+			this.maxVal = null;
+
+			// и почваме да пълним с върхове
+            for (let i = 0; i < this.numDots; ++i)
+            {
+                // функцията
+                let spikeyFactor1 = Math.sin(i)*(2*Math.cos(secondOffset*10));
+                let spikeyFactor2 = Math.cos(i)*(Math.cos(secondOffset*5)) + 0.2*Math.sin(secondOffset*10);
+
+                let yCoord = getGraphVal(i/50,this.offset, this.step, this.size, secondOffset) +
+					0.03*getGraphVal(i*20,this.offset, this.step, this.size, 2*secondOffset) +
+					spikeyFactor1 + spikeyFactor2;
+
+                // проверяваме дали е в рамките на гледане
+                if (i/this.numDots >= leftZoom && i/this.numDots <= (1-rightZoom))
+				{
+				    // нагласяме минимума
+				    if (this.minVal == null) { this.minVal = yCoord; }
+				    else
+					{
+					    this.minVal = (this.minVal > yCoord) ? yCoord : this.minVal;
+					}
+					// нагласяме максимума
+					if (this.maxVal == null) { this.maxVal = yCoord; }
+					else
+					{
+					    this.maxVal = (this.maxVal < yCoord) ? yCoord : this.maxVal;
+					}
+				}
+
+				// добаваме данните
+                this.data.push((i/this.numDots)*gl.canvas.width- gl.canvas.width/2, yCoord, 0);
+
+                // увеличаваме накъдрянето
+                secondOffset += 0.003;
+            }
+
+            // обвързваме буфера
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+            // подменяме данните
+            gl.bufferSubData(gl.ARRAY_BUFFER,0,new Float32Array(this.data));
+		};
+
+		function start( )
+		{
+		    // запазваме си няколко DOM елемента
+            picasso = document.getElementById("picasso");
+            lSlider = document.getElementById("l-slider");
+            lSpan = lSlider.children[0];
+            rSlider = document.getElementById("r-slider");
+			rSpan = rSlider.children[0];
+
+            // добавяме слушатели за събития в левия плъзгач
+            lSlider.addEventListener("mousedown", mouseDown);
+            lSlider.addEventListener("mousemove", mouseMoveLeft);
+            lSlider.addEventListener("mouseup", mouseUp);
+            lSlider.addEventListener("mouseout", mouseUp);
+
+            // добавяме слушатели за събития в десния плъзгач
+			rSlider.addEventListener("mousedown", mouseDown);
+			rSlider.addEventListener("mousemove", mouseMoveRight);
+			rSlider.addEventListener("mouseup", mouseUp);
+			rSlider.addEventListener("mouseout", mouseUp);
+
+			// добавяне на слушател за промяна на размера на прозореца
+            window.addEventListener("resize", windowResize);
+
+			// стандартния стартиращ процес
+			gl = getContext("picasso");
+			glprog = getProgram(vShader,fShader);
+			getVariables();
+
+			// използваме го за да опресним екрана
+            windowResize();
+
+            // обновяваме размера на плъзгачите
+            lSlider.style.width = (Math.round(leftZoom*gl.canvas.width)) + "px";
+            rSlider.style.width = (Math.round(rightZoom*gl.canvas.width)) + "px";
+
+            // избрах да работя с проценти - предполагам не е проблем
+            lSpan.innerHTML = Math.round(leftZoom*100) + "%";
+            rSpan.innerHTML = Math.round((1-rightZoom)*100) + "%";
+
+            // инициализираме програмата
+			init();
+		}
+
+		// за обновяване на размера на матрицата на ортогонално проектиране според новия размер на рисувателното поле
+		function updateProj()
+		{
+            var proj = orthoMatrix(gl.canvas.width, gl.canvas.height,-1000,1000);
+            gl.uniformMatrix4fv(uProjectionMatrix, false, proj);
+		}
+
+		function init()
+		{
+		    // стандартни неща
+            gl.clearColor(1,1,1,1);
+            identity();
+
+            // запазваме си няколко обекта
+            for (let i = 0; i < numObjects; ++i)
+            {
+                objects.push(new Sine(Math.round(random(5000, 50000)), random(0, Math.PI), random(300,500), random(0,100)));
+            }
+
+            drawFrame();
+		}
+		
+		function drawFrame()
+		{
+		    // чистим си екрана и гледаме
+			gl.clear(gl.COLOR_BUFFER_BIT+gl.DEPTH_BUFFER_BIT);
+			lookAt([0,0,500], [0,0,0], [0,1,0]);
+
+			// обновяваме матрицата на ортогонално проектиране
+            updateProj();
+
+            // за пазене на минимума на всички функции в определения от плъзгачите интервал
+            let minValue = null;
+            // за пазене на максимума на всички функции в определения от плъзгачите интервал
+            let maxValue = null;
+
+            // обновяваме обектите
+            for (let i = 0; i < numObjects; ++i)
+            {
+                // можеше да се оптимизира, но не се сещам за друг лесен начин да се определи
+				// минимума и максимума на функцията в даден интервал, понеже това го обновява
+                objects[i].change();
+
+                // намиране на минималната стойност на всички функции
+                if (minValue == null) { minValue = objects[i].minVal; }
+                else
+				{
+				    minValue = (minValue > objects[i].minVal) ? objects[i].minVal : minValue;
+				}
+				// намиране на максималната стойност на всички функции
+				if (maxValue == null) { maxValue = objects[i].maxVal; }
+				else
+				{
+				    maxValue = (maxValue < objects[i].maxVal) ? objects[i].maxVal : maxValue;
+				}
+            }
+
+            // запазваме само по веднъж в началото на програмата максималната и минималната стойности
+            if (initialMinValue == null) { initialMinValue = minValue; }
+            if (initialMaxValue == null) { initialMaxValue = maxValue; }
+
+            // рисуваме горната част
+            pushMatrix();
+            	// изчисления за хоризонталното трансформиране
+				let leftOffset = gl.canvas.width*leftZoom;
+				let rightOffset = gl.canvas.width*rightZoom;
+				let centerW = (gl.canvas.width - rightOffset + leftOffset)/2;
+				let distToRealCenterW = gl.canvas.width/2-centerW;
+
+				// изчисления за вертикалното трансформиране
+				let toFill = gl.canvas.height*(1-0.225);
+				let functionsGap = maxValue-minValue;
+				let centerH = (maxValue + minValue)/2;
+
+				// трансформираме
+				translate([0,(gl.canvas.height*(1+0.225))/2 - gl.canvas.height/2,0]);
+            	scale([1,toFill/functionsGap,1]);
+				translate([0,-centerH,0]);
+				scale([1/(1-leftZoom-rightZoom),1,1]);
+				translate([distToRealCenterW,0,0]);
+
+				// обхождаме и рисуваме всички криви
+				for (let i = 0; i < numObjects; ++i)
+				{
+					// задаваме, че не рисуваме 'минимапа'
+					objects[i].useMini = false;
+					// рисуваме
+					objects[i].draw();
+				}
+			popMatrix();
+
+			// рисуваме долната част
+			pushMatrix();
+				// отново сметки за трансформирането
+            	functionsGap = initialMaxValue - initialMinValue;
+            	centerH = (initialMaxValue + initialMinValue)/2;
+				toFill = gl.canvas.height*0.225;
+
+				// трансформираме
+				translate([0, gl.canvas.height*0.225 - gl.canvas.height/2 - gl.canvas.height*(0.225)/2, 0]);
+				scale([1,toFill/functionsGap,1]);
+				translate([0,-centerH,0]);
+
+				// рисуваме 'минимапа'
+				for (let i = 0; i < numObjects; ++i)
+				{
+				    // задаваме, че е в режим на рисуване на 'минимап'
+					objects[i].useMini = true;
+					objects[i].draw();
+				}
+			popMatrix();
+		}
+
+		function windowResize()
+		{
+            // преоразмеряваме буфера за рисуване
+            gl.canvas.width = window.innerWidth - 60;
+            gl.canvas.height = window.innerHeight - 60;
+            // както и мястото на гледане
+            gl.viewport(0,0,gl.canvas.width, gl.canvas.height);
+
+            // преоразмеряваме плъзгачите
+            lSlider.style.width = (Math.round(leftZoom*gl.canvas.width)) + "px";
+            rSlider.style.width = (Math.round(rightZoom*gl.canvas.width)) + "px";
+
+            requestAnimationFrame(drawFrame);
+		}
+
+		// какво да прави при натискане на мишката
+        function mouseDown(event)
+		{
+		    drag = true;
+
+		    mouseX = getX(event) + Math.round(gl.canvas.width/2);
+		    requestAnimationFrame(drawFrame);
+		}
+
+		// при влачене на левия плъзгач
+		function mouseMoveLeft(event)
+		{
+		    if (!drag) { return; }
+
+		    let x = getX(event) + Math.round(gl.canvas.width/2);
+
+		    // увеличаваме коефициента на приближение отляво
+            leftZoom += (x-mouseX)/Math.round(gl.canvas.width);
+
+            // ограничаваме го
+            if (leftZoom > 0.95 - rightZoom) { leftZoom = 0.95 - rightZoom;}
+            if (leftZoom < 0) { leftZoom = 0;}
+
+            // преоразмеряваме го
+            lSlider.style.width = (Math.round(leftZoom*gl.canvas.width)) + "px";
+            lSpan.innerHTML = Math.round(leftZoom*100) + "%";
+
+            mouseX = x;
+            requestAnimationFrame(drawFrame);
+		}
+
+        // при влачене на десния плъзгач
+        function mouseMoveRight(event)
+        {
+            if (!drag) { return; }
+
+            let x = getX(event) + Math.round(gl.canvas.width/2);
+
+            // увеличаваме коефициента на приближение отдясно
+            rightZoom += (mouseX - x)/Math.round(gl.canvas.width);
+
+            // ограничаваме го
+            if (rightZoom > 0.95 - leftZoom) { rightZoom = 0.95 - leftZoom; }
+            if (rightZoom < 0) { rightZoom = 0; }
+
+            // преоразмеряваме го
+            rSlider.style.width = (Math.round(rightZoom*gl.canvas.width)) + "px";
+            rSpan.innerHTML = Math.round((1-rightZoom)*100) + "%";
+
+            mouseX = x;
+            requestAnimationFrame(drawFrame);
+        }
+
+        // при пускане на мишката
+		function mouseUp()
+		{
+		    drag = false;
+		}
+	</script>	
+</head>
+
+<body onload="start()">
+	<canvas id="picasso"></canvas>
+
+	<div id="l-slider" class="slider left-slider" title="Влачи ме бавно">
+		<span></span>
+	</div>
+
+	<div id="r-slider" class="slider right-slider" title="Влачи ме бавно">
+		<span></span>
+	</div>
+
+	<div class="title">Графиката</div>
+
+</body>

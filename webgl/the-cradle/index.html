@@ -1,0 +1,360 @@
+﻿<!DOCTYPE html>
+
+<head>
+	<meta charset="utf-8"/>
+	<title>Люлката</title>
+
+	<script src="webgl-fmi.js"></script>
+	
+	<script id="vshader" type="x-shader/x-vertex">
+		uniform mat4 uProjectionMatrix;
+		uniform mat4 uViewMatrix;
+		uniform mat4 uModelMatrix;
+		
+		uniform bool uUseAmbient;
+		uniform vec3 uAmbientColor;
+
+		uniform bool uUseDiffuse;
+		uniform vec3 uDiffuseColor;
+
+		uniform vec3 uLightDir;
+		
+		attribute vec3 aXYZ;		// координати на връх
+		attribute vec3 aColor;		// цвят на връх
+		attribute vec3 aNormal;		// нормален вектор на връх
+
+		varying vec3 vNormal;
+		varying vec3 vColor;
+		varying vec3 vPos;
+		
+		void main ()
+		{
+			mat4 mvMatrix = uViewMatrix * uModelMatrix;
+			vec4 pos = mvMatrix * vec4(aXYZ,1);
+			gl_Position = uProjectionMatrix * pos;
+
+			// околна светлина
+			vColor = aColor;
+			if (uUseAmbient)
+				vColor *= uAmbientColor;
+			
+			// дифузно отражение
+			vec3 normal = vec3(normalize(mvMatrix*vec4(aNormal,0)));
+			vec3 light = normalize(-uLightDir);
+			if (uUseDiffuse)
+				vColor += aColor*uDiffuseColor*max(dot(normal,light),0.0);
+
+			vPos = pos.xyz/pos.w;
+			vNormal = normal;
+		}
+	</script>
+	
+	<script id="fshader" type="x-shader/x-fragment">
+		precision mediump float;
+
+		// преместено тук от другия шейдър
+		uniform highp vec3 uLightDir;
+		uniform bool uUseSpecular;
+		uniform vec3 uSpecularColor;
+
+		varying vec3 vNormal;
+		varying vec3 vColor;
+		varying vec3 vPos;
+
+		void main( )
+		{
+			vec3 light = normalize(-uLightDir);
+			
+			// намиране на отразения лъч
+			vec3 reflectedLight = normalize(reflect(light,normalize(vNormal)));
+
+			// в локалната координатна система "окото" на гледащия е в (0,0,0)
+			// а вектора от точката до "окото" е pos-(0,0,0) = pos
+			vec3 viewDir = normalize(vPos);
+
+			// готови сме да сметнем лъскавината
+			float cosa = abs(dot(reflectedLight,viewDir));
+			vec3 specularColor = vec3(pow(cosa,4.0));
+			
+			gl_FragColor = vec4(vColor+specularColor,1);
+		}
+	</script>
+
+	<script>
+        // Клас за топче с конци
+		NewtonBall = function(polarCenter, radius = 5)
+		{
+            this.ball = new Sphere([0,0,0], 1);
+		    this.ball.color = [0.4,0.4,0.4];
+
+		    this.rope = new Cone([0,0,0], 0.08, 7);
+		    this.rope.color = [0, 0, 0];
+
+		    this.speed = Math.PI/100;
+		    this.polarCenter = polarCenter;
+		    this.radius = radius;
+		};
+
+		NewtonBall.prototype.draw = function()
+		{
+		    this.ball.draw();
+
+		    this.rope.center = this.ball.center;
+		    yRotate(45);
+		    this.rope.draw();
+		    yRotate(-90);
+            this.rope.draw();
+		    yRotate(45);
+		};
+
+		// Клас за краче държащо опорите
+		Foot = function(center, size)
+		{
+		    this.color = [0.4, 0.25, 0.25];
+
+		    this.sphere = new Sphere(center, size);
+		    this.sphere.color = this.color;
+
+		    this.cylinder = new Cylinder(center, size, size*2);
+		    this.cylinder.color = this.color;
+
+		    this.size = size;
+		};
+
+		Foot.prototype.draw = function ()
+		{
+		    pushMatrix();
+				this.sphere.draw();
+				translate([0,0,-2*this.size]);
+				this.cylinder.draw();
+				translate([0,0,2*this.size]);
+            popMatrix();
+        };
+
+        // Клас за странични опорни греди
+		Beams = function(center, width, height)
+		{
+		    this.color = [0.8,0.8,0.8];
+
+		    this.cylinder = new Cylinder([0,0,0], width, height);
+		    this.cylinder.color = this.color;
+		    this.sphere = new Sphere(center, width);
+		    this.sphere.color = this.color;
+
+		    this.center = center;
+		};
+
+		Beams.prototype.draw = function()
+		{
+		    pushMatrix();
+		    	translate([this.center[0],this.center[1]-9,this.center[2]]);
+            	xRotate(37);
+		    	this.cylinder.draw();
+			popMatrix();
+
+            pushMatrix();
+				translate([this.center[0],this.center[1]+9,this.center[2]]);
+				xRotate(-37);
+				this.cylinder.draw();
+            popMatrix();
+
+            pushMatrix();
+            	translate([0,0,-this.center[2]]);
+            	this.sphere.draw();
+            popMatrix();
+		};
+
+
+		function start( )
+		{
+			var	canvas = document.getElementById("picasso");
+			canvas.addEventListener('webglcontextlost',function(event){event.preventDefault();},false);
+			canvas.addEventListener('webglcontextrestored',function(){init();},false);
+
+			init();
+			drawFrame();
+		}
+		
+		function init()
+		{
+			gl = getContext("picasso");
+			glprog = getProgram("vshader","fshader");
+
+			
+			aXYZ = gl.getAttribLocation(glprog,"aXYZ");
+			uProjectionMatrix = gl.getUniformLocation(glprog,"uProjectionMatrix");
+			uViewMatrix = gl.getUniformLocation(glprog,"uViewMatrix");
+			uModelMatrix = gl.getUniformLocation(glprog,"uModelMatrix");
+
+			aColor = gl.getAttribLocation(glprog,"aColor");
+			uAmbientColor = gl.getUniformLocation(glprog,"uAmbientColor");
+			uUseAmbient   = gl.getUniformLocation(glprog,"uUseAmbient");
+
+			aNormal = gl.getAttribLocation(glprog,"aNormal");
+			uDiffuseColor = gl.getUniformLocation(glprog,"uDiffuseColor");
+			uUseDiffuse = gl.getUniformLocation(glprog,"uUseDiffuse");
+			uUseSpecular = gl.getUniformLocation(glprog,"uUseSpecular");
+			uLightDir = gl.getUniformLocation(glprog,"uLightDir");
+
+			gl.enable(gl.DEPTH_TEST);
+			gl.clearColor(0.8,0.9,0.7,1);
+
+			identity();
+			perspective(30,gl.canvas.width/gl.canvas.height,1,40000);
+
+			gl.uniform3f(uAmbientColor,0.7,0.7,0.7);
+			gl.uniform1i(uUseAmbient,true);
+
+			gl.uniform3f(uDiffuseColor,1,1,1);
+			gl.uniform1i(uUseDiffuse,true);
+			
+			gl.uniform3f(uLightDir,0,-1,-0.3);
+
+			// обектите, съставящи люлката на Нютон,
+			// могат да бъдат създадени тук:
+			// Генериране на тялото на люлката
+			feet = [
+			    new Foot([5, -9, -12], 1),
+				new Foot([5, 9, -12], 1),
+				new Foot([-5, 9, -12], 1),
+				new Foot([-5, -9, -12], 1),
+			];
+
+			plane = new Cuboid([0,0,-12], [11, 18, 1]);
+			plane.color = [0.5,0.5,0.5];
+
+			beams = [new Beams([5,0,-12], 0.4, 15), new Beams([-5,0,-12], 0.4, 15)];
+
+			// Създаване на топките
+			balls = [];
+			n = 8;
+			radius = 5;
+			ballWidth = 0.4;
+			offset = -n/2*ballWidth + ballWidth/2;
+
+			for (let i = 0; i < n; ++i)
+			{
+			    balls.push(new NewtonBall(offset - Math.PI/2, radius));
+                balls[i].speed = 2.5;
+
+			    offset += ballWidth;
+			}
+
+			// Първоначално отместване за да се поддържат балансирани
+			xRotate(-12);
+			translate([0,0,5]);
+		}
+
+		var frame = 0;
+		var rotationAngle = 0;
+
+		// Изчислява отместването на крайните топчета
+		function calcOffset(ball, time)
+		{
+		    return Math.PI/2*Math.sin(calcOffsetInRadians(ball, time));
+		}
+
+		// Изчислява отместването на крайните топчета в радиани
+		function calcOffsetInRadians(ball, time)
+		{
+		    return ball.speed*time/50;
+		}
+		
+		function drawFrame()
+		{
+			frame++;
+			gl.clear(gl.COLOR_BUFFER_BIT+gl.DEPTH_BUFFER_BIT);
+
+			lookAt([55*Math.cos(frame/300),55*Math.sin(frame/300),0], [0,0,0], [0,0,1]);
+            //lookAt([55,0,0], [0,0,0], [0,0,1]);
+
+			// рисуване на стойката
+			pushMatrix();
+                xRotate(12);
+                // Рисуване на краката
+                for (let i = 0; i < feet.length; ++i)
+                {
+                    feet[i].draw();
+                }
+
+                // Рисуване на оснавата
+                plane.draw();
+
+                // Рисуване на опорните греди
+                for (let i = 0; i < beams.length; ++i)
+                {
+                    beams[i].draw();
+                }
+			popMatrix();
+
+			// Изчисляване на отместването в радиани
+			let radians = calcOffsetInRadians(balls[0], frame)%(2*Math.PI);
+			// Запазване на центровете на употреба по-късно
+            let prevFirstCenter = balls[0].polarCenter;
+            let prevLastCenter = balls[n-1].polarCenter;
+
+            // Движение на крайните топки
+			if (radians > Math.PI && radians < 2*Math.PI)
+			{
+                balls[0].polarCenter += calcOffset(balls[0], frame);
+			}
+
+			if (radians > 0 && radians < Math.PI)
+			{
+				balls[n-1].polarCenter += calcOffset(balls[n-1], frame);
+			}
+
+            // Въртене на топчетата за да се получи гравитация
+            if (radians > Math.PI - ballWidth / 2 && radians < Math.PI) { rotationAngle += 6; }
+
+            if (radians > 2 * Math.PI - ballWidth / 2) { rotationAngle -= 6;}
+
+            // Местене на топчетата между крайните две
+            if (radians > Math.PI && radians < Math.PI + 4*ballWidth)
+            {
+                for (let i = n-2; i > 0; --i)
+                {
+                    balls[i].polarCenter -= Math.exp(n/2-1.5*i)*0.004*Math.sin(Math.abs(radians-Math.PI)*2*Math.PI/(4*ballWidth));
+                }
+            }
+
+            if (radians < ballWidth*4)
+            {
+                for (let i = 1; i < n-1 ; ++i)
+                {
+                    balls[i].polarCenter += Math.exp(i-n/2)*0.004*Math.sin(Math.abs(radians)*2*Math.PI/(4*ballWidth));
+                }
+            }
+
+            // рисуване на n топки
+            for (let i=0; i<n; ++i)
+			{
+			    pushMatrix();
+                	xRotate(-balls[i].polarCenter*180/Math.PI - 90);
+                	xRotate(rotationAngle);
+			    	translate([0,0,-balls[i].radius]);
+
+					balls[i].draw();
+                popMatrix();
+			}
+
+			// Възстановяване на първоначалната позиция на крайните топчета
+            balls[0].polarCenter = prevFirstCenter;
+            balls[n-1].polarCenter = prevLastCenter;
+
+			requestAnimationFrame(drawFrame);
+		}
+	</script>	
+</head>
+
+<body onload="start()">
+	<h2>Люлката</h2>
+
+	<noscript>
+		Искаме JavaScript, но няма!
+	</noscript>
+	
+	<canvas id="picasso" width="600" height="400" style="border: solid;">
+		Искаме canvas, но няма!
+	</canvas>
+</body>
