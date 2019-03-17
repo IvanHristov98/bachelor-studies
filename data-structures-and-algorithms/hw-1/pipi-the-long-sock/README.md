@@ -1,4 +1,4 @@
-### Pipi the long sock ###
+## Pipi the long sock ##
 Pipi has N socks. Among them there aren't two of the same color. Not only that but the socks have a different length.
 Every single day Pipi selects a couple of socks from (N*(N-1))/2 options.
 She doesn't want them to repeat, and after all the options had been tested, Pipi decided to throw out the old socks and to buy new ones.
@@ -8,6 +8,6 @@ In the Kth day Pipi's decided to put on the Kth sock couple option from this ord
 
 Write down a program that finds out which sock couple Pipi must put on the Kth day, if she follows the rules described above.
 
-## Input format ##
+### Input format ###
 On the first row of the standard input are given two integers N and K - respectively number of the socks and  number of the day.
 On second row are written down N integers - the lengths of the socks in an ascending order. Numbers are separated by an interval.
