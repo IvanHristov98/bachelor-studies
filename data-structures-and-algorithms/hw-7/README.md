@@ -1,4 +1,4 @@
-Tasks from homework 5:
+Tasks from homework 7:
 
 [Brand new](./brand-new)<br/>
 [Elitism](./elitism)<br/>
