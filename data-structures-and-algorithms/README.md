@@ -6,4 +6,5 @@ The tasks are listed in:<br/>
 [Homework-2](./hw-2)<br/>
 [Homework-3](./hw-3)<br/>
 [Homework-4](./hw-4)<br/>
-[Homework-5](./hw-5)
+[Homework-5](./hw-5)<br/>
+[Homework-7](./hw-7)
