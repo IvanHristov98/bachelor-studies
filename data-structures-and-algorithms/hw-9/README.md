@@ -1,4 +1,4 @@
 Tasks from homework 9:
 
-[Rename](./renamek)<br/>
+[Rename](./rename)<br/>
 [Unique students](./unique-students)
