@@ -1,0 +1,133 @@
+SEMANTICS
+		A bluetooth configuration tool.
+
+SYNOPSIS
+		./main [ CONFIG_FILE ] { OPTION } [ OPTION ARG 1 [ OPTION ARG 2 [ ... ] ] ]
+
+DESCRIPTION
+		A configuration tool that accepts a file containing 64 byte segments.
+		Each segment is constructed of a header and a data part.
+
+		The header has a size of 8 bytes and it contains meta data. The first byte of the header specifies the type of the segment. Possible values for this byte are as follows:
+			0 - TEXT
+			1 - DIGIT
+			2 - BYTE
+		The rest 7 bytes are used as an activity bit mask. That should say that if the data part of the segment contains n options then the first bit of the of those 7 bytes specifies the activity of the first option, the second bit - the activity of the second option, and so on...
+		The maximum number of allowed acitivity bits is 7* 8 = 56.
+
+		The data part of the segment respectively has a size of 64 - 8 = 56 bytes. This part consists of data chunks with sizes depending to the type of the segment. For TEXT segments it is a 16 byte NULL terminated word. For DIGIT segments it is 4 bytes numbers. For BYTE it is 1 byte chunks.
+
+AVAILABLE FUNCTIONALITY
+		{ CONFIG_FILE } -s [ OPTION_NAME1 NEW_VALUE1 [ OPTION_NAME1 NEW_VALUE1 [ ... ] ] ] - Accepts a variable number of {option, new value} doubles. It validates the new value and if it is correct it sets the value of OPTION_NAMEN to NEW_VALUEN. It also sets the activity bit depending on the given new value. If new value is an empty string it sets the options value to nothing and unsets the activity bit. Else it sets the activity bit to 1.
+
+		{ CONFIG_FILE } -S [ OPTION_NAME1 NEW_VALUE1 [ OPTION_NAME1 NEW_VALUE1 [ ... ] ] ] - The same as -s but without changing the activity bits.
+
+		{ CONFIG_FILE } -g { OPTION_NAME } - Outputs the value of the given option only if it's activity bit is up. Prints options value pairs in the following format: 
+		OPTION> VALUE
+
+		{ CONFIG_FILE } -G { OPTION_NAME } - The same as -g, but outputs the value of the option regardless of whether the activity bit is up or down.
+
+		NOTE: -g and -G work only for a single option.
+
+		{ CONFIG_FILE } -l - outputs a list containing all of the configuration parameters within the file, that the device is currently using.
+
+		{ CONFIG_FILE } -L - the same as -l, but outputting parameters regardless of whether they are used or not.
+
+		{ CONFIG_FILE } -l { OPTION_NAME1 [ OPTION_NAME2 [ ... ] ] } - the same as -g but with multiple options.
+
+		{ CONFIG_FILE } -L { OPTION_NAME1 [ OPTION_NAME2 [ ... ] ] } - the same as -G but with multiple options.
+
+		{ CONFIG_FILE } -b { OPTION_NAME1 { 0, 1 } [ OPTION_NAME2 { 0, 1 } [ ... ] ] } - Changes whether an option is used or not by changing the value of it's acitivity bits.
+
+		{ CONFIG_FILE } -c { 0 { t, n, b } [ 1 { t, n, b } [ ... ] ] } - Creates a new empty configuration file with the specified types of segments. Allowed segmed types are t - text, n - number and b - byte. Note out that they should by order from 0, 1, ..., n and mustn't have any holes in between the numbers.
+
+		{ CONFIG_FILE } -h - outputs this help page.
+
+
+PERMITTED OPTION VALUES
+		Each segment has a pattern specifying what contents it could possibly contain. Here is a list of possible values:
+
+		device_name - [a-zA-Z0-9_-]
+		rom_revision - [a-zA-Z0-9_-]
+		serial_number - [A-Z0-9]
+
+		bd_addr_part0 - [A-Z0-9:]
+		bd_addr_part1 - [A-Z0-9:]
+		bd_pass_part0 - [a-z0-9]
+
+		serial_baudrate - {1200, 2400, 4800, 9600, 19200, 115200}
+		audio_bitrate - {32, 96, 128, 160, 192, 256, 320}
+		sleep_period - {100, 500, 1000, 5000, 10000} 
+
+		serial_parity - {N, E, O}
+		serial_data_bit - {5, 6, 7, 8}
+		serail_stop_bit - {0, 1}
+
+		bd_pass_part1 - [a-z0-9]
+		rom_checksum_part0 - [a-z0-9]
+		rom_checksum_part1 - [a-z0-9]
+
+SEGMENT ORDERING
+		Segments should be ordered in the following way - 0 - text, 1 - text, 2 - numeric, 3 - byte, 4 - text.
+
+OPTION ORDERING
+		By specification this bluetooth configuration tool accepts only files consenting to the following structure:
+
+		PARAMETER : SEGMENT : POSITION IN SEGMENT
+
+		device_name 		: 0 : 0
+		rom_revision 		: 0 : 1
+		serial_number		: 0 : 2
+
+		bd_addr_part0		: 1 : 0
+		bd_addr_part1		: 1 : 1
+		bd_pass_part0		: 1 : 2
+
+		serial_baudrate		: 2 : 0
+		audio_bitrate		: 2 : 1
+		sleep_period		: 2 : 2
+
+		serial_parity		: 3 : 0
+		serial_data_bit		: 3 : 1
+		serail_stop_bit		: 3 : 2
+
+		bd_pass_part1		: 4 : 0
+		rom_checksum_part0	: 4 : 1
+		rom_checksum_part1	: 4 : 2
+
+ADDITIONAL NOTES
+		This tool could create configuration files with a different structure from this.
+		Note out that this is an open source tool. Anyone who wishes to adapt it to a bluetooth device of his/her own must therefore change the configurations within the header part of main.c. 
+
+		This tool works for both little and big endian based architectures. By default the configuration files that are created and are supposed to be worked upon are in little endian format.
+
+		On configuration file creation with -c if the requested config file already exists it truncates the contents and rewrites them. Else if it doesn't exist it get's to be created.
+
+ERRORS RETURNED
+		Error names speak for themselves. Following are all the errors that could be returned after executing the tool:
+
+		INCORRECT_NUM_ARGS 1
+		WRONG_ARGS 2
+		INVALID_OPTION_VALUES 3
+		INVALID_ARG_VALUES 4
+		INVALID_OPTION_NAME 5
+		INVALID_FILE 6
+
+		FILE_READING_ERROR 10
+		WRONG_SEGMENT 11
+		FORKING_ERROR 12
+		UNAVAILABLE_RESOURCES 13
+		INTERNAL_PROCESS_ERROR 14
+		REGEX_COMP_ERROR 15
+
+		INACTIVE_OPTION 20
+		
+
+BUG REPORTING
+		Please if you get to find any bugs feel free to contact the author through ivan.hristov.biz@gmail.com.
+
+AUTHOR
+		Written by Ivan Hristov.
+
+LICENSE
+		This document is licensed under the General FMI License (GFL).
